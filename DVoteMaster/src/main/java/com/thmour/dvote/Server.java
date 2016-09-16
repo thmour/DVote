@@ -113,11 +113,7 @@ public class Server {
                         } else if (res == 400) {
                             responseCode = 403;
                             break;
-                        } else {
-                            //Incosistency
                         }
-                    } else {
-                        //Incosistency
                     }
                     count++;
                 }
@@ -218,10 +214,10 @@ public class Server {
         int[] total_votes = new int[6];
         Arrays.fill(total_votes, 0);
         for (int data_id = 0; data_id < workers.length; data_id++) {
-            int counter = -1;
+            int counter = -1, curr = -1;
             String vote_fragment_str = null;
             while (++counter < replFactor && vote_fragment_str == null) {
-                int curr = (data_id + counter) % workers.length;
+                curr = (data_id + counter) % workers.length;
                 if (available[curr] == false) {
                     continue;
                 }
@@ -229,7 +225,7 @@ public class Server {
                         ByteBuffer.allocate(Integer.BYTES).putInt(data_id).array());
             }
             if (vote_fragment_str != null) {
-                System.out.println(vote_fragment_str);
+                System.out.println("Data: " + data_id + " from " + curr + " : " + vote_fragment_str);
                 int[] votes_fragment = fromString(vote_fragment_str);
                 for (int i = 0; i < votes_fragment.length; i++) {
                     total_votes[i] += votes_fragment[i];

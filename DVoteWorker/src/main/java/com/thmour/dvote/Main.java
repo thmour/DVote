@@ -48,10 +48,8 @@ public class Main {
         Server server;
         Properties p = new Properties();
         File conf = new File(path+"/config.properties");
-        File data = new File(path+"/data");
         try {
             conf.createNewFile();
-            data.mkdir();
         } catch (IOException ex) {
             Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
         }

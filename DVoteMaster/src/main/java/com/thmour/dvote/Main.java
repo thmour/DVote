@@ -66,7 +66,7 @@ public class Main {
             Executors.newSingleThreadScheduledExecutor().schedule(() -> {
                 server.stop();
                 System.exit(0);
-            }, 1, TimeUnit.MINUTES);
+            }, 30, TimeUnit.SECONDS);
         } catch(IOException ex) {
             logger.log(Level.SEVERE, null, ex);
             System.exit(1);
