@@ -9,6 +9,7 @@
     <artifactId>DVoteMaster</artifactId>
     <packaging>jar</packaging>
     <build>
+        <finalName>DVoteMaster</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -16,9 +16,14 @@
  */
 package com.thmour.dvote;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
 
 /**
  *
@@ -45,11 +50,50 @@ public class Main {
         }
         return 500;
     }
+    
+    private static String RESULTS(String url_str) {
+        try {
+            URL url = new URL(url_str);
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setUseCaches(false);
+            con.setRequestMethod("POST");
+            con.setConnectTimeout(700);
+            if (con.getResponseCode() != 200) {
+                return null;
+            }
+            try (BufferedReader in = new BufferedReader(
+                    new InputStreamReader(con.getInputStream()))) {
+                String inputLine;
+                StringBuilder response = new StringBuilder();
+
+                while ((inputLine = in.readLine()) != null) {
+                    response.append(inputLine);
+                }
+                return response.toString();
+            }
+        } catch (Exception ex) {
+            //logger.log(Level.SEVERE, null, ex);
+        }
+        return null;
+    }
 
     public static void main(String[] args) {
-        for (int i = 0; i < 10000; i++) {
-            POST("http://localhost:8000/vote", ("voter=" + i + "&candidate=" + (i % 6)).getBytes());
-            if(i % 1000 == 0) System.out.println((i/100) + "%");
+        Map<Integer, Integer> codeMap = new HashMap<>();
+        Random r = new Random();
+        if (args.length == 3) {
+            String host = args[0];
+            int requests = Integer.valueOf(args[1]);
+            int candidates = Integer.valueOf(args[2]);
+            for (int i = 0; i < requests; i++) {
+                int code = POST("http://"+host+"/vote",
+                        ("voter=" + i + "&candidate=" + r.nextInt(candidates)).getBytes());
+                Integer count = codeMap.get(code);
+                codeMap.put(code, count == null ? 1 : count + 1);
+            }
+            System.out.println(codeMap);
+            System.out.println(RESULTS("http://"+host+"/results"));
+        } else {
+            System.err.println("Invalid arguments: <host:port> <#requests> <#candidates>");
         }
     }
 }

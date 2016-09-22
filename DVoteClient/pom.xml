@@ -9,6 +9,7 @@
     <artifactId>DVoteClient</artifactId>
     <packaging>jar</packaging>
     <build>
+        <finalName>DVoteClient</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

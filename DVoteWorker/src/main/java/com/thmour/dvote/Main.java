@@ -34,6 +34,8 @@ import java.util.logging.Logger;
  */
 
 public class Main {
+    private static final Logger LOGGER = Logger.getLogger(Server.class.getName());
+    
     public static void main(String[] args) {
         String path = null;
         try {
@@ -41,33 +43,32 @@ public class Main {
                     .getLocation().toURI().getPath();
             path = path.substring(0, path.lastIndexOf("/"));
         } catch (URISyntaxException ex) {
-            Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+            LOGGER.log(Level.SEVERE, null, ex);
             System.exit(1);
+        }
+        
+        File conf = new File(path+"/config.properties");
+        try {
+            conf.createNewFile();
+        } catch (IOException ex) {
+            LOGGER.log(Level.SEVERE, null, ex);
         }
         
         Server server;
         Properties p = new Properties();
-        File conf = new File(path+"/config.properties");
-        File data = new File(path+"/data");
-        try {
-            conf.createNewFile();
-            data.mkdir();
-        } catch (IOException ex) {
-            Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
-        }
-        
-        try(InputStream in = new FileInputStream(conf)) {
+        try(InputStream in = new FileInputStream(path+"/config.properties")) {
             p.load(in);
-            int port = Integer.valueOf(p.getProperty("worker.port", "8080"));
+            int port = Integer.valueOf(p.getProperty("worker.port", "9090"));
             String[] workers = p.getProperty("workers", "localhost").split(",");
-            server = new Server(path, workers, port);
+            int candidates = Integer.valueOf(p.getProperty("candidates", "3"));
+            server = new Server(path, workers, candidates, port);
             server.start();
             Executors.newSingleThreadScheduledExecutor().schedule(() -> {
                 server.stop();
                 System.exit(1);
             }, 1, TimeUnit.DAYS);
         } catch (Exception ex) {
-            Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+            LOGGER.log(Level.SEVERE, null, ex);
         }
     }
 }

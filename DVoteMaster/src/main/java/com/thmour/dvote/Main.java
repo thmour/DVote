@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Properties;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -32,7 +31,8 @@ import java.util.logging.Logger;
  * @author theofilos
  */
 public class Main {
-    private static final Logger logger = Logger.getLogger(Main.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
+    
     public static void main(String[] args) {
         String path = null;
         try {
@@ -40,7 +40,7 @@ public class Main {
                     .getLocation().toURI().getPath();
             path = path.substring(0, path.lastIndexOf("/"));
         } catch (URISyntaxException ex) {
-            logger.log(Level.SEVERE, null, ex);
+            LOGGER.log(Level.SEVERE, null, ex);
             System.exit(1);
         }
         
@@ -48,27 +48,28 @@ public class Main {
         try {
             conf.createNewFile();
         } catch (IOException ex) {
-            logger.log(Level.SEVERE, null, ex);
+            LOGGER.log(Level.SEVERE, null, ex);
         }
         
         Properties prop = new Properties();
         Server server;
-        int replicationFactor, port, worker_port;
         String[] workers;
-        try (FileInputStream fis = new FileInputStream("config.properties")) {
+        int replicationFactor, port, worker_port, candidates;
+        try (FileInputStream fis = new FileInputStream(path+"/config.properties")) {
             prop.load(fis);
             replicationFactor = Integer.valueOf(prop.getProperty("replication", "1"));
             workers = prop.getProperty("workers", "localhost").split(",");
-            port = Integer.valueOf(prop.getProperty("server.port", "8000"));
-            worker_port = Integer.valueOf(prop.getProperty("worker.port", "8000"));
-            server = new Server(replicationFactor, workers, port, worker_port);
+            port = Integer.valueOf(prop.getProperty("master.port", "9000"));
+            worker_port = Integer.valueOf(prop.getProperty("worker.port", "9090"));
+            candidates = Integer.valueOf(prop.getProperty("candidates", "3"));
+            server = new Server(replicationFactor, workers, candidates, port, worker_port);
             server.start();
             Executors.newSingleThreadScheduledExecutor().schedule(() -> {
                 server.stop();
                 System.exit(0);
-            }, 1, TimeUnit.MINUTES);
+            }, 1, TimeUnit.DAYS);
         } catch(IOException ex) {
-            logger.log(Level.SEVERE, null, ex);
+            LOGGER.log(Level.SEVERE, null, ex);
             System.exit(1);
         }
     }
