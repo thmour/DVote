@@ -41,36 +41,38 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javafx.util.Pair;
 
 /**
  *
  * @author theofilos
  */
-public class Server {
+class Server {
 
-    static final Logger LOGGER = Logger.getLogger(Server.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(Server.class.getName());
 
     private final HttpServer server;
-    private final Executor default_executor;
     private final String data_path;
-    private final int num_workers;
     private final int row_len = 2 * Short.BYTES + Integer.BYTES + Long.BYTES;
-    private final HttpHandler store_data;
-    private final HttpHandler results;
-    private final HttpHandler alive;
-    private final HttpHandler resolve;
-    private final HttpHandler batch_store;
-    private final ConcurrentHashMap<Integer, Pair<Short, Long>>[] voteMap;
+    private final ConcurrentHashMap<Integer, VoteEntry>[] voteMap;
     private final AtomicLongArray[] voteResults;
     private final BlockingQueue<ByteBuffer> writeQueue;
     private final ExecutorService writer = Executors.newSingleThreadExecutor();
 
-    public Server(String path, String[] worker_addr, int numcandidates, int port)
+    private class VoteEntry {
+        final short candidate;
+        final long timestamp;
+
+        VoteEntry(short candidate, long timestamp) {
+            this.candidate = candidate;
+            this.timestamp = timestamp;
+        }
+    }
+
+    Server(String path, String[] worker_addr, int numcandidates, int port)
             throws IOException, URISyntaxException {
-        this.writeQueue = new ArrayBlockingQueue(1, true);
+        this.writeQueue = new ArrayBlockingQueue<>(1, true);
         this.data_path = path + "/data.bin";
-        this.num_workers = worker_addr.length;
+        int num_workers = worker_addr.length;
         this.voteResults = new AtomicLongArray[num_workers];
         this.voteMap = new ConcurrentHashMap[num_workers];
         for (int i = 0; i < num_workers; i++) {
@@ -79,9 +81,9 @@ public class Server {
         }
 
         int threads = Runtime.getRuntime().availableProcessors();
-        default_executor = Executors.newFixedThreadPool(threads);
+        Executor default_executor = Executors.newFixedThreadPool(threads);
 
-        this.store_data = (HttpExchange ht) -> {
+        HttpHandler store_data = (HttpExchange ht) -> {
             byte[] buffer = new byte[row_len];
 
             InputStream input = ht.getRequestBody();
@@ -91,7 +93,7 @@ public class Server {
             short worker = bf.getShort();
             int voter = bf.getInt();
             short vote = bf.getShort();
-            long tstamp = bf.getLong();
+            long timestamp = bf.getLong();
 
             int responseCode = 200;
             if (voteMap[worker].containsKey(voter)) {
@@ -99,7 +101,7 @@ public class Server {
             } else {
                 try {
                     writeQueue.put(bf);
-                    voteMap[worker].put(voter, new Pair<>(vote, tstamp));
+                    voteMap[worker].put(voter, new Server.VoteEntry(vote, timestamp));
                     voteResults[worker].getAndIncrement(vote);
                 } catch (Exception ex) {
                     LOGGER.log(Level.SEVERE, null, ex);
@@ -125,7 +127,7 @@ public class Server {
             }
         };
 
-        this.results = (HttpExchange ht) -> {
+        HttpHandler results = (HttpExchange ht) -> {
             DataInputStream dis = new DataInputStream(ht.getRequestBody());
             short data_index = dis.readShort();
             StringBuilder sb = new StringBuilder();
@@ -140,7 +142,7 @@ public class Server {
             }
         };
 
-        this.alive = (HttpExchange ht) -> {
+        HttpHandler alive = (HttpExchange ht) -> {
             String message = "OK";
             try (OutputStream res = ht.getResponseBody()) {
                 ht.sendResponseHeaders(200, message.length());
@@ -148,22 +150,22 @@ public class Server {
             }
         };
 
-        this.resolve = (HttpExchange ht) -> {
+        HttpHandler resolve = (HttpExchange ht) -> {
             DataInputStream ds = new DataInputStream(ht.getRequestBody());
             short to_worker = ds.readShort();
             short data_id = ds.readShort();
             long start_time = ds.readLong();
             long end_time = ds.readLong();
 
-            ArrayList<ByteBuffer> toBeSent = new ArrayList();
+            ArrayList<ByteBuffer> toBeSent = new ArrayList<>();
 
-            voteMap[data_id].forEach((Integer voter, Pair<Short, Long> vote_pair) -> {
-                long vote_timestamp = vote_pair.getValue();
+            voteMap[data_id].forEach((Integer voter, Server.VoteEntry vote_pair) -> {
+                long vote_timestamp = vote_pair.timestamp;
                 if (vote_timestamp > start_time && vote_timestamp < end_time) {
                     ByteBuffer bf = ByteBuffer.allocate(row_len)
                             .putShort(data_id)
                             .putInt(voter)
-                            .putShort(vote_pair.getKey())
+                            .putShort(vote_pair.candidate)
                             .putLong(vote_timestamp);
                     toBeSent.add(bf);
                 }
@@ -177,7 +179,7 @@ public class Server {
                     bf.get(message, row * row_len, row_len);
                     row++;
                 }
-                responseCode = POST("http://" + worker_addr[to_worker] 
+                responseCode = POST("http://" + worker_addr[to_worker]
                         + ":" + port + "/batch_store", message);
             }
             String message = responseCode == 200 ? "OK" : "Batch load failed";
@@ -186,16 +188,16 @@ public class Server {
                 res.write(message.getBytes());
             }
         };
-        
-        this.batch_store = (HttpExchange ht) -> {
+
+        HttpHandler batch_store = (HttpExchange ht) -> {
             ByteBuffer bf;
             byte[] buffer = new byte[row_len];
             int voter, responseCode = 200;
             long timestamp;
             short worker, vote;
-            
+
             InputStream input = ht.getRequestBody();
-            while(input.read(buffer) != -1) {
+            while (input.read(buffer) != -1) {
                 bf = ByteBuffer.wrap(buffer);
                 worker = bf.getShort();
                 voter = bf.getInt();
@@ -203,7 +205,7 @@ public class Server {
                 timestamp = bf.getLong();
                 try {
                     writeQueue.put(bf);
-                    voteMap[worker].put(voter, new Pair<>(vote, timestamp));
+                    voteMap[worker].put(voter, new Server.VoteEntry(vote, timestamp));
                     voteResults[worker].getAndIncrement(vote);
                 } catch (Exception ex) {
                     LOGGER.log(Level.SEVERE, null, ex);
@@ -227,7 +229,7 @@ public class Server {
         LOGGER.log(Level.INFO, "Server ready at {0}", String.valueOf(port));
     }
 
-    public int POST(String url_str, byte[] message) {
+    private int POST(String url_str, byte[] message) {
         try {
             URL url = new URL(url_str);
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
@@ -250,7 +252,7 @@ public class Server {
         return 500;
     }
 
-    public boolean loadData() {
+    private boolean loadData() {
         File file = new File(data_path);
         if (!file.exists()) {
             return false;
@@ -269,7 +271,7 @@ public class Server {
                     short candidate = data.getShort();
                     long timestamp = data.getLong();
                     voteMap[data_id].put(voter,
-                            new Pair<>(candidate, timestamp));
+                            new VoteEntry(candidate, timestamp));
                     voteResults[data_id].incrementAndGet(candidate);
                 }
             }
@@ -282,7 +284,7 @@ public class Server {
         return true;
     }
 
-    public void start() {
+    void start() {
         loadData();
         writer.execute(() -> {
             try (FileOutputStream fos = new FileOutputStream(data_path, true)) {
@@ -298,7 +300,7 @@ public class Server {
         server.start();
     }
 
-    public void stop() {
+    void stop() {
         writer.shutdownNow();
         server.stop(0);
     }

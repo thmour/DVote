@@ -46,9 +46,7 @@ public class Server {
 
     private final Object TimestampLock = new Object();
     private final HttpServer server;
-    private final HttpHandler mainHandler;
-    private final HttpHandler resultHandler;
-    private final int replFactor;
+    private final int replicationFactor;
     private final int worker_port;
     private final String[] workers;
     private final boolean[] available;
@@ -57,16 +55,16 @@ public class Server {
     private final long[] data_timestamps;
     private final ConcurrentLinkedQueue<DataMiss> data_miss_queue;
     private final ScheduledExecutorService ping_pong;
-    private final ScheduledExecutorService incosistency;
+    private final ScheduledExecutorService inconsistency;
     private final int num_workers;
 
-    public class DataMiss {
+    private class DataMiss {
 
-        public final int worker;
-        public final long start;
-        public final long end;
+        final int worker;
+        final long start;
+        final long end;
 
-        public DataMiss(int worker, long start, long end) {
+        DataMiss(int worker, long start, long end) {
             this.worker = worker;
             this.start = start;
             this.end = end;
@@ -90,12 +88,12 @@ public class Server {
         return "http://" + workers[wid] + ":" + worker_port + uri.value;
     }
 
-    public Server(int replFactor, String[] workers, int candidates, int port,
-            int worker_port) throws IOException {
+    Server(int replicationFactor, String[] workers, int candidates, int port,
+           int worker_port) throws IOException {
         this.num_workers = workers.length;
         this.ping_pong = Executors.newSingleThreadScheduledExecutor();
-        this.incosistency = Executors.newSingleThreadScheduledExecutor();
-        this.replFactor = replFactor;
+        this.inconsistency = Executors.newSingleThreadScheduledExecutor();
+        this.replicationFactor = replicationFactor;
         this.workers = workers;
         this.worker_port = worker_port;
         this.data_timestamps = new long[num_workers];
@@ -104,15 +102,15 @@ public class Server {
         Arrays.fill(data_timestamps, 0L);
         this.data_miss_queue = new ConcurrentLinkedQueue<>();
 
-        this.mainHandler = (HttpExchange ht) -> {
+        HttpHandler mainHandler = (HttpExchange ht) -> {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(ht.getRequestBody()));
             String query = in.readLine();
 
             int voter = -1;
             short candidate = -1;
-            for (String keyval : query.split("&")) {
-                String[] tmp = keyval.split("=");
+            for (String key_value : query.split("&")) {
+                String[] tmp = key_value.split("=");
                 if ("voter".equals(tmp[0])) {
                     voter = Integer.valueOf(tmp[1]);
                 }
@@ -125,15 +123,15 @@ public class Server {
             if (voter == -1 || candidate == -1) {
                 responseCode = 400;
             } else {
-                int repl_index = 0;
+                int replication_index = 0;
                 short dataIndex = (short) (voter % num_workers);
                 ByteBuffer message = ByteBuffer.allocate(msg_len);
                 message.putShort(dataIndex).putInt(voter).putShort(candidate);
                 long timestamp = System.currentTimeMillis();
                 message.putLong(timestamp);
                 int done = 0;
-                while (repl_index < replFactor) {
-                    int curr = (dataIndex + repl_index) % num_workers;
+                while (replication_index < replicationFactor) {
+                    int curr = (dataIndex + replication_index) % num_workers;
                     if (available[curr]) {
                         int res = POST(makeURL(curr, WorkerAction.STORE), message.array());
                         if (res == 200) {
@@ -148,7 +146,7 @@ public class Server {
                             break;
                         }
                     }
-                    repl_index++;
+                    replication_index++;
                 }
                 if (done == 0 && responseCode != 403) {
                     responseCode = 500;
@@ -175,7 +173,7 @@ public class Server {
             }
         };
 
-        this.resultHandler = (HttpExchange ht) -> {
+        HttpHandler resultHandler = (HttpExchange ht) -> {
             int[] total_votes = new int[candidates];
             Arrays.fill(total_votes, 0);
 
@@ -183,9 +181,9 @@ public class Server {
             for (int data_id = 0; data_id < num_workers; data_id++) {
                 int counter = -1;
                 String vote_fragment_str = null;
-                while (++counter < replFactor && vote_fragment_str == null) {
+                while (++counter < replicationFactor && vote_fragment_str == null) {
                     int curr = (data_id + counter) % num_workers;
-                    if (available[curr] == false) {
+                    if (!available[curr]) {
                         continue;
                     }
                     vote_fragment_str = GET(makeURL(curr, WorkerAction.RESULTS),
@@ -198,7 +196,7 @@ public class Server {
                     }
                 } else {
                     LOGGER.log(Level.SEVERE, "{0} servers down in a row, "
-                            + " please increase replication factor", replFactor);
+                            + " please increase replication factor", replicationFactor);
                     responseCode = 500;
                 }
             }
@@ -279,16 +277,16 @@ public class Server {
         return result;
     }
 
-    public void start() {
+    void start() {
         ping_pong.scheduleAtFixedRate(() -> {
             for (int workerID = 0; workerID < num_workers; workerID++) {
                 if (GET(makeURL(workerID, WorkerAction.ALIVE), null) != null) {
-                    if (available[workerID] == false) {
+                    if (!available[workerID]) {
                         available[workerID] = true;
                         long max_timestamp = 0;
                         synchronized (TimestampLock) {
-                            int init = (workerID - replFactor + 1);
-                            int len = 2 * replFactor - 1;
+                            int init = (workerID - replicationFactor + 1);
+                            int len = 2 * replicationFactor - 1;
                             for (int i = 0; i < len; i++) {
                                 int curr_worker = (init + i) >= 0 ? (init + i)
                                         % num_workers : init + i + num_workers;
@@ -307,17 +305,17 @@ public class Server {
                 }
             }
         }, 0, 1, TimeUnit.SECONDS);
-        if (replFactor > 1) {
-            incosistency.scheduleWithFixedDelay(() -> {
+        if (replicationFactor > 1) {
+            inconsistency.scheduleWithFixedDelay(() -> {
                 DataMiss dm;
                 while ((dm = data_miss_queue.poll()) != null) {
-                    for (int replica = 0; replica < replFactor; replica++) {
+                    for (int replica = 0; replica < replicationFactor; replica++) {
                         int data_id = dm.worker - replica;
                         if (data_id < 0) {
                             data_id += num_workers;
                         }
                         boolean done = false;
-                        for (int i = data_id; i < replFactor; i++) {
+                        for (int i = data_id; i < replicationFactor; i++) {
                             int curr_worker = (data_id + i) % num_workers;
                             if (available[curr_worker] == false
                                     || curr_worker == dm.worker) {
@@ -333,7 +331,7 @@ public class Server {
                                 break;
                             }
                         }
-                        if (done == false) {
+                        if (!done) {
                             LOGGER.log(Level.SEVERE, "Incosistency encountered,"
                                     + " please increase replication factor");
                         }
@@ -344,7 +342,7 @@ public class Server {
         server.start();
     }
 
-    public void stop() {
+    void stop() {
         ping_pong.shutdown();
         server.stop(0);
     }
