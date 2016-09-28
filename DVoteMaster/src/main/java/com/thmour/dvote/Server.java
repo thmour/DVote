@@ -40,7 +40,7 @@ import java.util.logging.Logger;
  *
  * @author theofilos
  */
-public class Server {
+class Server {
 
     private static final Logger LOGGER = Logger.getLogger(Server.class.getName());
 
@@ -243,7 +243,6 @@ public class Server {
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
             con.setUseCaches(false);
             con.setRequestMethod("POST");
-            con.setConnectTimeout(700);
             if (message != null) {
                 con.setDoOutput(true);
                 con.getOutputStream().write(message);
@@ -309,6 +308,7 @@ public class Server {
             inconsistency.scheduleWithFixedDelay(() -> {
                 DataMiss dm;
                 while ((dm = data_miss_queue.poll()) != null) {
+                    long t1 = System.currentTimeMillis();
                     for (int replica = 0; replica < replicationFactor; replica++) {
                         int data_id = dm.worker - replica;
                         if (data_id < 0) {
@@ -317,7 +317,7 @@ public class Server {
                         boolean done = false;
                         for (int i = data_id; i < replicationFactor; i++) {
                             int curr_worker = (data_id + i) % num_workers;
-                            if (available[curr_worker] == false
+                            if (!available[curr_worker]
                                     || curr_worker == dm.worker) {
                                 continue;
                             }
@@ -332,10 +332,12 @@ public class Server {
                             }
                         }
                         if (!done) {
-                            LOGGER.log(Level.SEVERE, "Incosistency encountered,"
+                            LOGGER.log(Level.SEVERE, "Inconsistency encountered,"
                                     + " please increase replication factor");
                         }
                     }
+                    long t2 = System.currentTimeMillis();
+                    System.out.println("Recovery time for worker " + dm.worker + " was " + (t2-t1));
                 }
             }, 5, 5, TimeUnit.SECONDS);
         }

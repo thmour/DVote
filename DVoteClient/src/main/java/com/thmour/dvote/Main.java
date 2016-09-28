@@ -86,7 +86,8 @@ public class Main {
             int candidates = Integer.valueOf(args[2]);
             for (int i = 0; i < requests; i++) {
                 int code = POST("http://"+host+"/vote",
-                        ("voter=" + i + "&candidate=" + r.nextInt(candidates)).getBytes());
+                        ("voter=" + r.nextInt(Integer.MAX_VALUE) +
+                         "&candidate=" + r.nextInt(candidates)).getBytes());
                 Integer count = codeMap.get(code);
                 codeMap.put(code, count == null ? 1 : count + 1);
             }
